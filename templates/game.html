@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chamber Chase</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Chamber Chase</h1>
+            <p class="description">Navigate to any exit while avoiding the AI enemy!</p>
+        </header>
+
+        <div class="game-info">
+            <div class="status">
+                <span id="turn-indicator">Your Turn</span>
+                <span id="game-status"></span>
+                <span id="move-counter">Moves: 0/0</span>
+                <span id="ai-status"></span>
+            </div>
+            <div class="difficulty-controls">
+                <label for="difficulty-select">Difficulty:</label>
+                <select id="difficulty-select" onchange="changeDifficulty()">
+                    <option value="easy">Easy</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="hard">Hard</option>
+                    <option value="nightmare">Nightmare</option>
+                </select>
+                <button id="new-game-btn" onclick="startNewGame()">New Game</button>
+            </div>
+        </div>
+
+        <div class="game-stats">
+            <div class="stat-item">
+                <span id="detection-status">Not Detected</span>
+            </div>
+            <div class="stat-item">
+                <span id="distance-info">Distance to Exit: --</span>
+            </div>
+            <div class="stat-item">
+                <span id="vision-info">Vision Range: --</span>
+            </div>
+        </div>
+
+        <div class="game-container">
+            <div id="game-grid" class="grid"></div>
+        </div>
+
+        <div class="controls">
+            <h3>Controls:</h3>
+            <div class="control-buttons">
+                <button class="move-btn" onclick="movePlayer('up')">↑</button>
+                <div class="horizontal-controls">
+                    <button class="move-btn" onclick="movePlayer('left')">←</button>
+                    <button class="move-btn" onclick="movePlayer('down')">↓</button>
+                    <button class="move-btn" onclick="movePlayer('right')">→</button>
+                </div>
+            </div>
+            <p class="controls-text">Use arrow buttons or WASD keys to move</p>
+        </div>
+
+        <div class="difficulty-info">
+            <h3>Difficulty Effects:</h3>
+            <div class="difficulty-details">
+                <div class="diff-item">
+                    <strong>Easy:</strong> Large vision range, AI chases directly, 3 exits, generous time limit
+                </div>
+                <div class="diff-item">
+                    <strong>Medium:</strong> Moderate vision, AI predicts moves, 2 exits, balanced obstacles
+                </div>
+                <div class="diff-item">
+                    <strong>Hard:</strong> Limited vision, AI intercepts paths, 2 exits, more obstacles
+                </div>
+                <div class="diff-item">
+                    <strong>Nightmare:</strong> Minimal vision, AI strategic positioning, 1 exit, maximum difficulty
+                </div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <h3>Legend:</h3>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-square player">
+                        <span class="player-symbol">👤</span>
+                    </div>
+                    <span>Player (You)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square ai">
+                        <span class="ai-symbol">🤖</span>
+                    </div>
+                    <span>AI Enemy</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square ai-detected">
+                        <span class="ai-symbol-detected">⚡</span>
+                    </div>
+                    <span>AI (Player Detected)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square exit">
+                        <span class="exit-symbol">🚪</span>
+                    </div>
+                    <span>Exit</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square obstacle"></div>
+                    <span>Obstacle</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square empty"></div>
+                    <span>Empty Space</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-square fog"></div>
+                    <span>Fog of War</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let gameState = null;
+
+        // Initialize game when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadGameState();
+            setupKeyboardControls();
+        });
+
+        // Setup keyboard controls
+        function setupKeyboardControls() {
+            document.addEventListener('keydown', function(event) {
+                if (gameState && !gameState.game_over && gameState.turn === 'player') {
+                    switch(event.key.toLowerCase()) {
+                        case 'w':
+                        case 'arrowup':
+                            event.preventDefault();
+                            movePlayer('up');
+                            break;
+                        case 's':
+                        case 'arrowdown':
+                            event.preventDefault();
+                            movePlayer('down');
+                            break;
+                        case 'a':
+                        case 'arrowleft':
+                            event.preventDefault();
+                            movePlayer('left');
+                            break;
+                        case 'd':
+                        case 'arrowright':
+                            event.preventDefault();
+                            movePlayer('right');
+                            break;
+                    }
+                }
+            });
+        }
+
+        // Load current game state
+        async function loadGameState() {
+            try {
+                const response = await fetch('/api/game_state');
+                gameState = await response.json();
+                updateDisplay();
+            } catch (error) {
+                console.error('Error loading game state:', error);
+            }
+        }
+
+        // Move player
+        async function movePlayer(direction) {
+            if (!gameState || gameState.game_over || gameState.turn !== 'player') {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/move', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ direction: direction })
+                });
+
+                gameState = await response.json();
+                updateDisplay();
+            } catch (error) {
+                console.error('Error moving player:', error);
+            }
+        }
+
+        // Start new game
+        async function startNewGame() {
+            const difficulty = document.getElementById('difficulty-select').value;
+            try {
+                const response = await fetch('/api/new_game', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ difficulty: difficulty })
+                });
+                gameState = await response.json();
+                updateDisplay();
+            } catch (error) {
+                console.error('Error starting new game:', error);
+            }
+        }
+
+        // Change difficulty
+        function changeDifficulty() {
+            // Game will be reset when new game is started
+        }
+
+        // Update the display
+        function updateDisplay() {
+            if (!gameState) return;
+
+            updateGrid();
+            updateStatus();
+            updateStats();
+        }
+
+        // Update the game grid display with fog of war
+        function updateGrid() {
+            const gridElement = document.getElementById('game-grid');
+            gridElement.innerHTML = '';
+            gridElement.style.gridTemplateColumns = `repeat(${gameState.width}, 1fr)`;
+
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+
+                    // Check visibility using visible_grid
+                    const isVisible = gameState.visible_grid[y][x] !== -1;
+                    
+                    if (!isVisible) {
+                        // Cell is in fog of war
+                        cell.classList.add('fog');
+                    } else {
+                        // Cell is visible - determine type
+                        if (gameState.visible_grid[y][x] === 1) {
+                            cell.classList.add('obstacle');
+                        } else {
+                            cell.classList.add('empty');
+                        }
+                    }
+
+                    // Add player (always visible to themselves)
+                    if (gameState.player_pos[0] === x && gameState.player_pos[1] === y) {
+                        cell.classList.add('player');
+                        const playerSymbol = document.createElement('span');
+                        playerSymbol.className = 'player-symbol';
+                        playerSymbol.textContent = '👤';
+                        cell.appendChild(playerSymbol);
+                    }
+
+                    // Add AI only if visible to player
+                    if (gameState.ai_pos[0] === x && gameState.ai_pos[1] === y && gameState.ai_visible) {
+                        const aiSymbol = document.createElement('span');
+                        if (gameState.player_detected) {
+                            cell.classList.add('ai-detected');
+                            aiSymbol.className = 'ai-symbol-detected';
+                            aiSymbol.textContent = '⚡';
+                        } else {
+                            cell.classList.add('ai');
+                            aiSymbol.className = 'ai-symbol';
+                            aiSymbol.textContent = '🤖';
+                        }
+                        cell.appendChild(aiSymbol);
+                    }
+
+                    // Add exits (show if visible or if player has seen them before)
+                    const isExit = gameState.exit_positions.some(exit => exit[0] === x && exit[1] === y);
+                    if (isExit && isVisible) {
+                        cell.classList.add('exit');
+                        const exitSymbol = document.createElement('span');
+                        exitSymbol.className = 'exit-symbol';
+                        exitSymbol.textContent = '🚪';
+                        cell.appendChild(exitSymbol);
+                    }
+
+                    gridElement.appendChild(cell);
+                }
+            }
+        }
+
+        // Update status display
+        function updateStatus() {
+            const turnIndicator = document.getElementById('turn-indicator');
+            const gameStatus = document.getElementById('game-status');
+            const moveCounter = document.getElementById('move-counter');
+            const aiStatus = document.getElementById('ai-status');
+
+            // Update move counter
+            if (gameState.moves_remaining !== undefined) {
+                moveCounter.textContent = `Moves: ${gameState.move_count}/${gameState.max_moves} (${gameState.moves_remaining} left)`;
+                
+                // Color code based on remaining moves
+                if (gameState.moves_remaining <= 5) {
+                    moveCounter.className = 'danger';
+                } else if (gameState.moves_remaining <= 10) {
+                    moveCounter.className = 'warning';
+                } else {
+                    moveCounter.className = '';
+                }
+            }
+
+            // Update AI status
+            if (gameState.ai_state) {
+                const aiStateText = {
+                    'patrol': 'Patrolling',
+                    'investigate': 'Investigating',
+                    'chase': 'Chasing!'
+                };
+                aiStatus.textContent = `AI: ${aiStateText[gameState.ai_state] || gameState.ai_state}`;
+                aiStatus.className = gameState.ai_state === 'chase' ? 'danger' : '';
+            }
+
+            if (gameState.game_over) {
+                if (gameState.game_won) {
+                    turnIndicator.textContent = 'You Win!';
+                    turnIndicator.className = 'win';
+                    gameStatus.textContent = 'You reached the exit!';
+                } else {
+                    turnIndicator.textContent = 'Game Over';
+                    turnIndicator.className = 'lose';
+                    if (gameState.moves_remaining <= 0) {
+                        gameStatus.textContent = 'Out of moves!';
+                    } else {
+                        gameStatus.textContent = 'The AI caught you!';
+                    }
+                }
+            } else {
+                if (gameState.turn === 'player') {
+                    turnIndicator.textContent = 'Your Turn';
+                    turnIndicator.className = '';
+                } else {
+                    turnIndicator.textContent = 'AI Turn';
+                    turnIndicator.className = 'ai-turn';
+                }
+                gameStatus.textContent = `Difficulty: ${gameState.difficulty.charAt(0).toUpperCase() + gameState.difficulty.slice(1)}`;
+            }
+        }
+
+        // Update game statistics
+        function updateStats() {
+            const detectionStatus = document.getElementById('detection-status');
+            const distanceInfo = document.getElementById('distance-info');
+            const visionInfo = document.getElementById('vision-info');
+
+            // Detection status
+            if (gameState.player_detected) {
+                detectionStatus.textContent = 'DETECTED!';
+                detectionStatus.className = 'detected';
+            } else {
+                detectionStatus.textContent = 'Not Detected';
+                detectionStatus.className = 'not-detected';
+            }
+
+            // Distance to nearest exit
+            if (gameState.min_distance_to_exit !== undefined && gameState.min_distance_to_exit !== Infinity) {
+                distanceInfo.textContent = `Distance to Exit: ${gameState.min_distance_to_exit}`;
+            } else {
+                distanceInfo.textContent = 'Distance to Exit: --';
+            }
+
+            // Vision range info
+            if (gameState.player_vision_range !== undefined) {
+                visionInfo.textContent = `Vision Range: ${gameState.player_vision_range}`;
+            }
+        }
+    </script>
+</body>
+</html>
